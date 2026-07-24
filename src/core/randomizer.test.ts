@@ -54,4 +54,24 @@ describe("randomize", () => {
     const { palette } = randomize(definition, 5);
     expect(definition.paletteOptions).toContainEqual(palette);
   });
+
+  it("diverges between consecutive unseeded calls even within the same millisecond", () => {
+    const manyVariantDefinition: ObjectDefinition = {
+      ...definition,
+      slots: [
+        {
+          name: "head",
+          position: { x: 0, y: 0 },
+          variants: Array.from({ length: 20 }, (_, i) => ({
+            id: `v${i}`,
+            anchor: { x: 0, y: 0 },
+            grid: [["x"]],
+          })),
+        },
+      ],
+    };
+    const results = Array.from({ length: 10 }, () => randomize(manyVariantDefinition));
+    const distinctChoices = new Set(results.map((r) => r.choices.head));
+    expect(distinctChoices.size).toBeGreaterThan(1);
+  });
 });

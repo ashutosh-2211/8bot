@@ -33,8 +33,10 @@ registerShape(sphereDefinition);
 
 const colorOptions = ["#4488cc", "#cc4444", "#ccaa44", "#8844cc"];
 
+let unseededCallCount = 0;
+
 function pickColor(seed?: number): string {
-  const rng = mulberry32(seed ?? Date.now());
+  const rng = mulberry32(seed ?? Date.now() + unseededCallCount++);
   return colorOptions[Math.floor(rng() * colorOptions.length)];
 }
 

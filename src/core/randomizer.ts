@@ -16,8 +16,10 @@ export function mulberry32(seed: number): () => number {
   };
 }
 
+let unseededCallCount = 0;
+
 export function randomize(definition: ObjectDefinition, seed?: number): RandomChoice {
-  const rng = mulberry32(seed ?? Date.now());
+  const rng = mulberry32(seed ?? Date.now() + unseededCallCount++);
   const choices: Record<string, string> = {};
   for (const slot of definition.slots) {
     if (slot.variants.length === 0) continue;

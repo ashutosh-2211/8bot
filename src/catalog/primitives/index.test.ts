@@ -34,4 +34,9 @@ describe("primitive shapes", () => {
   it("randomCube is deterministic for a given seed", () => {
     expect(randomCube(15)).toEqual(randomCube(15));
   });
+
+  it("unseeded randomCube calls diverge even within the same millisecond", () => {
+    const colors = new Set(Array.from({ length: 20 }, () => randomCube().pixels[0].color));
+    expect(colors.size).toBeGreaterThan(1);
+  });
 });
