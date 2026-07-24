@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the `8bot` npm package — a framework-agnostic core for composing 8-bit pixel objects, a built-in catalog (Human, Elephant, Tree, Octopod, Tetrapod, Flying bot, UFO, Cube, Oblongoid, Sphere), and Canvas/SVG renderers, all published as one package with subpath exports.
+**Goal:** Build the `8bot` npm package — a framework-agnostic core for composing 8-bit pixel objects, a built-in catalog (Human, Elephant, Tree, Octopod, Tetrapod, Flying bot, UFO, Cube, Oblongoid, Sphere), Canvas/SVG renderers, and a pose/walk-cycle/bounds system so limbs can animate and consumers (e.g. a React app) can position and detect interaction with objects — all published as one package with subpath exports.
 
-**Architecture:** Three layers: `core` (Part/Palette/ObjectDefinition/ShapeDefinition types, a registry, a composer that turns chosen parts + a palette into a renderer-agnostic `ComposedObject`, and a seeded randomizer), `catalog` (built-in object definitions, one folder per object, each exposing `createX()`/`randomX()`), and `canvas`/`svg` (thin adapters that draw a `ComposedObject`). Same `ComposedObject` shape serves flat 2D and isometric 2.5D — layer number drives projection offset in the renderers.
+**Architecture:** Three layers: `core` (Part/Palette/ObjectDefinition/ShapeDefinition types, a registry, a composer that turns chosen parts + a palette + an optional per-slot pixel-offset pose into a renderer-agnostic `ComposedObject`, a seeded randomizer, a generic `walkCycle` pose generator, and `getBounds`/`intersects` helpers), `catalog` (built-in object definitions, one folder per object, each exposing `createX()`/`randomX()`, with leg/arm/thruster slots marked `role: "limb"`), and `canvas`/`svg` (thin adapters that draw a `ComposedObject`). Same `ComposedObject` shape serves flat 2D and isometric 2.5D — layer number drives projection offset in the renderers. Movement is procedural (re-compose each frame with a new pose), not pre-drawn animation frames.
 
 **Tech Stack:** TypeScript, tsup (build), Vitest + jsdom (tests).
 
@@ -14,6 +14,8 @@
 - No `Co-Authored-By: Claude` (or any AI co-author) trailer in any commit. Use short conventional-commit-style messages, e.g. `feat(core): add composer`.
 - Palette customization is tagged-region based (region tag string → hex color), never raw palette-index based.
 - The composer output (`ComposedObject`) must be plain data with no DOM/Canvas dependency, so both renderers and future custom adapters consume the same shape.
+- Limb movement is a per-slot pixel offset applied at compose time (`Pose`), not pixel-grid rotation and not pre-authored animation frames.
+- 8bot never touches the DOM or tracks an object's world position itself — it only exposes bounds/position data (`getBounds`, `intersects`) for the consumer's own app to use.
 - Subpath exports required: `8bot`, `8bot/core`, `8bot/catalog`, `8bot/canvas`, `8bot/svg`.
 - Every task that adds behavior must add a Vitest test co-located as `*.test.ts` next to the source file, and tests must pass before committing.
 
@@ -187,7 +189,7 @@ git commit -m "chore: scaffold package tooling"
 - Create: `src/core/types.ts`
 
 **Interfaces:**
-- Produces: `RegionTag`, `Pixel`, `PixelGrid`, `Part`, `Palette`, `SlotDefinition`, `ObjectDefinition`, `ShapeKind`, `ShapeDefinition`, `ComposedPixel`, `ComposedObject` — used by every later task.
+- Produces: `RegionTag`, `Pixel`, `PixelGrid`, `Part`, `Palette`, `SlotDefinition` (with `role`), `ObjectDefinition`, `ShapeKind`, `ShapeDefinition`, `ComposedPixel`, `ComposedObject`, `Pose`, `Position`, `Bounds` — used by every later task.
 
 - [ ] **Step 1: Write `src/core/types.ts`**
 
@@ -207,11 +209,14 @@ export interface Palette {
   [regionTag: string]: string;
 }
 
+export type SlotRole = "limb" | "body" | "accessory";
+
 export interface SlotDefinition {
   name: string;
   variants: Part[];
   position: { x: number; y: number };
   layer?: number;
+  role?: SlotRole;
 }
 
 export interface ObjectDefinition {
@@ -246,6 +251,18 @@ export interface ComposedObject {
   width: number;
   height: number;
   pixels: ComposedPixel[];
+}
+
+export type Pose = Record<string, { dx?: number; dy?: number }>;
+
+export interface Position {
+  x: number;
+  y: number;
+}
+
+export interface Bounds extends Position {
+  width: number;
+  height: number;
 }
 ```
 
@@ -405,7 +422,7 @@ git commit -m "feat(core): add palette resolution and color utils"
 
 **Interfaces:**
 - Consumes: `ObjectDefinition`, `ShapeDefinition` from `src/core/types.ts` (Task 2).
-- Produces: `registerObject(definition)`, `getObject(name): ObjectDefinition`, `listObjects(): string[]`, `registerShape(definition)`, `getShape(name): ShapeDefinition`, `listShapes(): string[]` — used by catalog object modules (Tasks 10-17).
+- Produces: `registerObject(definition)`, `getObject(name): ObjectDefinition`, `listObjects(): string[]`, `registerShape(definition)`, `getShape(name): ShapeDefinition`, `listShapes(): string[]` — used by catalog object modules (Tasks 11-18).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -536,8 +553,8 @@ git commit -m "feat(core): add object and shape registry"
 - Test: `src/core/composer.test.ts`
 
 **Interfaces:**
-- Consumes: `resolvePalette`, `colorForRegion`, `lighten`, `darken` from `src/core/palette.ts` (Task 3); `ObjectDefinition`, `ShapeDefinition`, `ComposedObject`, `Palette` from `src/core/types.ts` (Task 2).
-- Produces: `compose(definition, choices?, paletteOverrides?): ComposedObject`, `composeShape(definition, colorOverride?): ComposedObject` — used by every catalog object (Tasks 10-17) and both renderers (Tasks 8-9).
+- Consumes: `resolvePalette`, `colorForRegion`, `lighten`, `darken` from `src/core/palette.ts` (Task 3); `ObjectDefinition`, `ShapeDefinition`, `ComposedObject`, `Palette`, `Pose` from `src/core/types.ts` (Task 2).
+- Produces: `compose(definition, choices?, paletteOverrides?, pose?): ComposedObject`, `composeShape(definition, colorOverride?): ComposedObject` — used by every catalog object (Tasks 11-18), both renderers (Tasks 9-10), and `walkCycle` (Task 6, which produces the `pose` argument consumers pass back in).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -600,6 +617,15 @@ describe("compose", () => {
   it("applies a palette override", () => {
     const result = compose(square, {}, { fill: "#ffffff" });
     expect(result.pixels.every((p) => p.color === "#ffffff")).toBe(true);
+  });
+
+  it("applies a pose offset to a slot", () => {
+    const result = compose(square, {}, {}, { block: { dx: 3, dy: -1 } });
+    expect(result.pixels).toEqual([
+      { x: 3, y: -1, color: "#112233", layer: 0 },
+      { x: 4, y: -1, color: "#112233", layer: 0 },
+      { x: 3, y: 0, color: "#112233", layer: 0 },
+    ]);
   });
 
   it("throws for an unknown variant id", () => {
@@ -665,13 +691,15 @@ import type {
   ComposedObject,
   ComposedPixel,
   Palette,
+  Pose,
 } from "./types";
 import { resolvePalette, colorForRegion, lighten, darken } from "./palette";
 
 export function compose(
   definition: ObjectDefinition,
   choices: Record<string, string> = {},
-  paletteOverrides: Partial<Palette> = {}
+  paletteOverrides: Partial<Palette> = {},
+  pose: Pose = {}
 ): ComposedObject {
   const palette = resolvePalette(definition, paletteOverrides);
   const pixels: ComposedPixel[] = [];
@@ -692,12 +720,15 @@ export function compose(
       );
     }
     const layer = slot.layer ?? part.layer ?? 0;
+    const offset = pose[slot.name] ?? {};
+    const offsetX = offset.dx ?? 0;
+    const offsetY = offset.dy ?? 0;
     part.grid.forEach((row, rowIndex) => {
       row.forEach((tag, colIndex) => {
         if (tag === null) return;
         pixels.push({
-          x: slot.position.x + part.anchor.x + colIndex,
-          y: slot.position.y + part.anchor.y + rowIndex,
+          x: slot.position.x + part.anchor.x + colIndex + offsetX,
+          y: slot.position.y + part.anchor.y + rowIndex + offsetY,
           color: colorForRegion(palette, tag),
           layer,
         });
@@ -755,12 +786,192 @@ Expected: PASS
 
 ```bash
 git add src/core/composer.ts src/core/composer.test.ts
-git commit -m "feat(core): add compose and composeShape"
+git commit -m "feat(core): add compose and composeShape with pose offsets"
 ```
 
 ---
 
-### Task 6: Randomizer
+### Task 6: Pose, walk cycle, and bounds utilities
+
+**Files:**
+- Create: `src/core/walkCycle.ts`
+- Create: `src/core/bounds.ts`
+- Test: `src/core/walkCycle.test.ts`
+- Test: `src/core/bounds.test.ts`
+
+**Interfaces:**
+- Consumes: `ObjectDefinition`, `SlotDefinition`, `Pose`, `ComposedObject`, `Position`, `Bounds` from `src/core/types.ts` (Task 2).
+- Produces: `walkCycle(definition, t): Pose` — feeds directly into `compose(definition, choices, palette, pose)` (Task 5) each animation frame; `getBounds(object, position?, pixelSize?): Bounds` and `intersects(a, b): boolean` — used by consumers (e.g. a React app) to compare an object's on-screen bounds against another element's bounds.
+
+- [ ] **Step 1: Write the failing test for `walkCycle`**
+
+```ts
+import { describe, expect, it } from "vitest";
+import { walkCycle } from "./walkCycle";
+import type { ObjectDefinition } from "./types";
+
+function definitionWithLegs(legCount: number): ObjectDefinition {
+  const legPart = { id: "default", anchor: { x: 0, y: 0 }, grid: [["x"]] };
+  return {
+    name: "walker",
+    width: legCount,
+    height: 1,
+    slots: [
+      { name: "body", variants: [legPart], position: { x: 0, y: 0 }, role: "body" },
+      ...Array.from({ length: legCount }, (_, i) => ({
+        name: `leg${i}`,
+        variants: [legPart],
+        position: { x: i, y: 1 },
+        role: "limb" as const,
+      })),
+    ],
+    defaultPalette: { x: "#000000" },
+    allowedRegionTags: ["x"],
+  };
+}
+
+describe("walkCycle", () => {
+  it("only produces offsets for slots marked role: limb", () => {
+    const pose = walkCycle(definitionWithLegs(4), 0);
+    expect(Object.keys(pose).sort()).toEqual(["leg0", "leg1", "leg2", "leg3"]);
+  });
+
+  it("works for any limb count, including 8 legs and 2 thrusters", () => {
+    expect(Object.keys(walkCycle(definitionWithLegs(8), 0))).toHaveLength(8);
+    expect(Object.keys(walkCycle(definitionWithLegs(2), 0))).toHaveLength(2);
+  });
+
+  it("alternates even and odd limb slots out of phase", () => {
+    const pose = walkCycle(definitionWithLegs(4), Math.PI / 2);
+    expect(pose.leg0.dy).toBe(pose.leg2.dy);
+    expect(pose.leg1.dy).toBe(pose.leg3.dy);
+    expect(pose.leg0.dy).not.toBe(pose.leg1.dy);
+  });
+
+  it("is a pure function of t (same t gives the same pose)", () => {
+    expect(walkCycle(definitionWithLegs(4), 1.2)).toEqual(walkCycle(definitionWithLegs(4), 1.2));
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npx vitest run src/core/walkCycle.test.ts`
+Expected: FAIL with "Cannot find module './walkCycle'".
+
+- [ ] **Step 3: Write `src/core/walkCycle.ts`**
+
+```ts
+import type { ObjectDefinition, Pose } from "./types";
+
+export function walkCycle(definition: ObjectDefinition, t: number): Pose {
+  const limbSlots = definition.slots.filter((slot) => slot.role === "limb");
+  const pose: Pose = {};
+  limbSlots.forEach((slot, index) => {
+    const phase = t + (index % 2) * Math.PI;
+    pose[slot.name] = { dy: Math.round(Math.sin(phase)) };
+  });
+  return pose;
+}
+```
+
+- [ ] **Step 4: Run test to verify `walkCycle` passes**
+
+Run: `npx vitest run src/core/walkCycle.test.ts`
+Expected: PASS
+
+- [ ] **Step 5: Write the failing test for bounds**
+
+```ts
+import { describe, expect, it } from "vitest";
+import { getBounds, intersects } from "./bounds";
+import type { ComposedObject } from "./types";
+
+const object: ComposedObject = { name: "test", width: 10, height: 20, pixels: [] };
+
+describe("getBounds", () => {
+  it("defaults to position (0,0) and pixelSize 1", () => {
+    expect(getBounds(object)).toEqual({ x: 0, y: 0, width: 10, height: 20 });
+  });
+
+  it("uses a given world position", () => {
+    expect(getBounds(object, { x: 50, y: 100 })).toEqual({ x: 50, y: 100, width: 10, height: 20 });
+  });
+
+  it("scales width/height by pixelSize", () => {
+    expect(getBounds(object, { x: 0, y: 0 }, 8)).toEqual({ x: 0, y: 0, width: 80, height: 160 });
+  });
+});
+
+describe("intersects", () => {
+  it("returns true when two bounds overlap", () => {
+    const a = { x: 0, y: 0, width: 10, height: 10 };
+    const b = { x: 5, y: 5, width: 10, height: 10 };
+    expect(intersects(a, b)).toBe(true);
+  });
+
+  it("returns false when two bounds are apart", () => {
+    const a = { x: 0, y: 0, width: 10, height: 10 };
+    const b = { x: 100, y: 100, width: 10, height: 10 };
+    expect(intersects(a, b)).toBe(false);
+  });
+
+  it("returns false when bounds only touch at an edge", () => {
+    const a = { x: 0, y: 0, width: 10, height: 10 };
+    const b = { x: 10, y: 0, width: 10, height: 10 };
+    expect(intersects(a, b)).toBe(false);
+  });
+});
+```
+
+- [ ] **Step 6: Run test to verify it fails**
+
+Run: `npx vitest run src/core/bounds.test.ts`
+Expected: FAIL with "Cannot find module './bounds'".
+
+- [ ] **Step 7: Write `src/core/bounds.ts`**
+
+```ts
+import type { ComposedObject, Position, Bounds } from "./types";
+
+export function getBounds(
+  object: ComposedObject,
+  position: Position = { x: 0, y: 0 },
+  pixelSize = 1
+): Bounds {
+  return {
+    x: position.x,
+    y: position.y,
+    width: object.width * pixelSize,
+    height: object.height * pixelSize,
+  };
+}
+
+export function intersects(a: Bounds, b: Bounds): boolean {
+  return (
+    a.x < b.x + b.width &&
+    a.x + a.width > b.x &&
+    a.y < b.y + b.height &&
+    a.y + a.height > b.y
+  );
+}
+```
+
+- [ ] **Step 8: Run test to verify bounds tests pass**
+
+Run: `npx vitest run src/core/bounds.test.ts`
+Expected: PASS
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add src/core/walkCycle.ts src/core/walkCycle.test.ts src/core/bounds.ts src/core/bounds.test.ts
+git commit -m "feat(core): add walkCycle pose generator and bounds utilities"
+```
+
+---
+
+### Task 7: Randomizer
 
 **Files:**
 - Create: `src/core/randomizer.ts`
@@ -768,7 +979,7 @@ git commit -m "feat(core): add compose and composeShape"
 
 **Interfaces:**
 - Consumes: `ObjectDefinition`, `Palette` from `src/core/types.ts` (Task 2).
-- Produces: `mulberry32(seed): () => number`, `randomize(definition, seed?): { choices: Record<string,string>; palette: Partial<Palette> }` — used by every catalog object's `randomX()` (Tasks 10-17).
+- Produces: `mulberry32(seed): () => number`, `randomize(definition, seed?): { choices: Record<string,string>; palette: Partial<Palette> }` — used by every catalog object's `randomX()` (Tasks 11-18).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -889,15 +1100,15 @@ git commit -m "feat(core): add seeded randomizer"
 
 ---
 
-### Task 7: Core barrel export
+### Task 8: Core barrel export
 
 **Files:**
 - Create: `src/core/index.ts`
 - Test: `src/core/index.test.ts`
 
 **Interfaces:**
-- Consumes: everything from Tasks 2-6.
-- Produces: the `8bot/core` public surface relied on by the catalog (Tasks 10-17) and by consumers building custom objects.
+- Consumes: everything from Tasks 2-7.
+- Produces: the `8bot/core` public surface relied on by the catalog (Tasks 11-18) and by consumers building custom objects or driving animation/interaction.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -917,6 +1128,9 @@ describe("core barrel export", () => {
     expect(typeof core.mulberry32).toBe("function");
     expect(typeof core.resolvePalette).toBe("function");
     expect(typeof core.colorForRegion).toBe("function");
+    expect(typeof core.walkCycle).toBe("function");
+    expect(typeof core.getBounds).toBe("function");
+    expect(typeof core.intersects).toBe("function");
   });
 });
 ```
@@ -934,6 +1148,8 @@ export * from "./palette";
 export * from "./registry";
 export * from "./composer";
 export * from "./randomizer";
+export * from "./walkCycle";
+export * from "./bounds";
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -950,7 +1166,7 @@ git commit -m "feat(core): add core barrel export"
 
 ---
 
-### Task 8: Canvas renderer
+### Task 9: Canvas renderer
 
 **Files:**
 - Create: `src/canvas/drawToCanvas.ts`
@@ -958,7 +1174,7 @@ git commit -m "feat(core): add core barrel export"
 - Test: `src/canvas/drawToCanvas.test.ts`
 
 **Interfaces:**
-- Consumes: `ComposedObject` from `src/core/types.ts` (Task 2).
+- Consumes: `ComposedObject` from `src/core/types.ts` (Task 2). Takes whatever `compose()` (Task 5) returned — if the caller passed a `pose` (e.g. from `walkCycle`, Task 6) into `compose()` before calling this, the renderer just draws the already-posed result; it has no pose logic of its own.
 - Produces: `drawToCanvas(ctx, object, options?): void` — public via `8bot/canvas`.
 
 - [ ] **Step 1: Write the failing test**
@@ -1075,7 +1291,7 @@ git commit -m "feat(canvas): add drawToCanvas renderer"
 
 ---
 
-### Task 9: SVG renderer
+### Task 10: SVG renderer
 
 **Files:**
 - Create: `src/svg/toSvgString.ts`
@@ -1195,7 +1411,7 @@ git commit -m "feat(svg): add toSvgString and renderToSvgElement"
 
 ---
 
-### Task 10: Catalog grid utilities + Human
+### Task 11: Catalog grid utilities + Human
 
 **Files:**
 - Create: `src/catalog/_shared/gridUtils.ts`
@@ -1205,8 +1421,8 @@ git commit -m "feat(svg): add toSvgString and renderToSvgElement"
 - Test: `src/catalog/human/index.test.ts`
 
 **Interfaces:**
-- Consumes: `compose` from `src/core/composer.ts`, `registerObject` from `src/core/registry.ts`, `randomize` from `src/core/randomizer.ts`, `Palette`/`Part`/`PixelGrid`/`Pixel`/`ObjectDefinition` from `src/core/types.ts`.
-- Produces: `filled(rows, cols, tag): PixelGrid` and `withPixels(grid, overrides): PixelGrid` in `_shared/gridUtils.ts` (reused by every later catalog task); `createHuman(options?)`, `randomHuman(seed?)`, `humanDefinition` from `catalog/human`.
+- Consumes: `compose` from `src/core/composer.ts`, `registerObject` from `src/core/registry.ts`, `randomize` from `src/core/randomizer.ts`, `Palette`/`Part`/`PixelGrid`/`Pixel`/`ObjectDefinition`/`Pose` from `src/core/types.ts`.
+- Produces: `filled(rows, cols, tag): PixelGrid` and `withPixels(grid, overrides): PixelGrid` in `_shared/gridUtils.ts` (reused by every later catalog task); `createHuman(options?)`, `randomHuman(seed?)`, `humanDefinition` from `catalog/human`. Arm and leg slots are marked `role: "limb"` so `walkCycle` (Task 6) animates them.
 
 - [ ] **Step 1: Write `src/catalog/_shared/gridUtils.ts`**
 
@@ -1288,12 +1504,12 @@ export const humanDefinition: ObjectDefinition = {
   width: 9,
   height: 17,
   slots: [
-    { name: "head", variants: heads, position: { x: 2, y: 0 } },
-    { name: "torso", variants: torsos, position: { x: 2, y: 5 } },
-    { name: "armLeft", variants: arms, position: { x: 0, y: 5 } },
-    { name: "armRight", variants: arms, position: { x: 7, y: 5 } },
-    { name: "legLeft", variants: legs, position: { x: 2, y: 11 } },
-    { name: "legRight", variants: legs, position: { x: 5, y: 11 } },
+    { name: "head", variants: heads, position: { x: 2, y: 0 }, role: "body" },
+    { name: "torso", variants: torsos, position: { x: 2, y: 5 }, role: "body" },
+    { name: "armLeft", variants: arms, position: { x: 0, y: 5 }, role: "limb" },
+    { name: "armRight", variants: arms, position: { x: 7, y: 5 }, role: "limb" },
+    { name: "legLeft", variants: legs, position: { x: 2, y: 11 }, role: "limb" },
+    { name: "legRight", variants: legs, position: { x: 5, y: 11 }, role: "limb" },
   ],
   defaultPalette: { skin: "#e0ac69", outfit: "#3355ff", eyes: "#1a1a1a", hair: "#4a2c17" },
   allowedRegionTags: ["skin", "outfit", "eyes", "hair"],
@@ -1307,7 +1523,7 @@ export const humanDefinition: ObjectDefinition = {
 import { compose } from "../../core/composer";
 import { registerObject } from "../../core/registry";
 import { randomize } from "../../core/randomizer";
-import type { Palette } from "../../core/types";
+import type { Palette, Pose } from "../../core/types";
 import { humanDefinition } from "./definition";
 
 registerObject(humanDefinition);
@@ -1315,10 +1531,11 @@ registerObject(humanDefinition);
 export interface CreateHumanOptions {
   parts?: Record<string, string>;
   palette?: Partial<Palette>;
+  pose?: Pose;
 }
 
 export function createHuman(options: CreateHumanOptions = {}) {
-  return compose(humanDefinition, options.parts ?? {}, options.palette ?? {});
+  return compose(humanDefinition, options.parts ?? {}, options.palette ?? {}, options.pose ?? {});
 }
 
 export function randomHuman(seed?: number) {
@@ -1333,7 +1550,8 @@ export { humanDefinition };
 
 ```ts
 import { describe, expect, it } from "vitest";
-import { createHuman, randomHuman } from "./index";
+import { createHuman, randomHuman, humanDefinition } from "./index";
+import { walkCycle } from "../../core/walkCycle";
 
 describe("human catalog object", () => {
   it("composes with default parts and palette", () => {
@@ -1358,6 +1576,17 @@ describe("human catalog object", () => {
     const b = randomHuman(42);
     expect(a).toEqual(b);
   });
+
+  it("marks arm and leg slots as limbs so walkCycle animates them", () => {
+    const pose = walkCycle(humanDefinition, 0);
+    expect(Object.keys(pose).sort()).toEqual(["armLeft", "armRight", "legLeft", "legRight"]);
+  });
+
+  it("accepts a pose and composes a visibly different result", () => {
+    const standing = createHuman();
+    const walking = createHuman({ pose: walkCycle(humanDefinition, Math.PI / 2) });
+    expect(walking.pixels).not.toEqual(standing.pixels);
+  });
 });
 ```
 
@@ -1370,12 +1599,12 @@ Expected: PASS
 
 ```bash
 git add src/catalog/_shared src/catalog/human
-git commit -m "feat(catalog): add human object"
+git commit -m "feat(catalog): add human object with limb slots"
 ```
 
 ---
 
-### Task 11: Elephant
+### Task 12: Elephant
 
 **Files:**
 - Create: `src/catalog/elephant/parts.ts`
@@ -1384,8 +1613,8 @@ git commit -m "feat(catalog): add human object"
 - Test: `src/catalog/elephant/index.test.ts`
 
 **Interfaces:**
-- Consumes: `filled`, `withPixels` from `src/catalog/_shared/gridUtils.ts` (Task 10); `compose`, `registerObject`, `randomize` from core (Tasks 4-6).
-- Produces: `createElephant(options?)`, `randomElephant(seed?)`, `elephantDefinition`.
+- Consumes: `filled`, `withPixels` from `src/catalog/_shared/gridUtils.ts` (Task 11); `compose`, `registerObject`, `randomize` from core.
+- Produces: `createElephant(options?)`, `randomElephant(seed?)`, `elephantDefinition`. Its 4 leg slots are marked `role: "limb"`.
 
 - [ ] **Step 1: Write `src/catalog/elephant/parts.ts`**
 
@@ -1425,14 +1654,14 @@ export const elephantDefinition: ObjectDefinition = {
   width: 14,
   height: 10,
   slots: [
-    { name: "body", variants: bodies, position: { x: 2, y: 0 } },
-    { name: "legFrontLeft", variants: legs, position: { x: 2, y: 6 } },
-    { name: "legFrontRight", variants: legs, position: { x: 5, y: 6 } },
-    { name: "legBackLeft", variants: legs, position: { x: 8, y: 6 } },
-    { name: "legBackRight", variants: legs, position: { x: 10, y: 6 } },
-    { name: "trunk", variants: trunks, position: { x: 0, y: 2 } },
-    { name: "earLeft", variants: ears, position: { x: 2, y: 0 } },
-    { name: "earRight", variants: ears, position: { x: 10, y: 0 } },
+    { name: "body", variants: bodies, position: { x: 2, y: 0 }, role: "body" },
+    { name: "legFrontLeft", variants: legs, position: { x: 2, y: 6 }, role: "limb" },
+    { name: "legFrontRight", variants: legs, position: { x: 5, y: 6 }, role: "limb" },
+    { name: "legBackLeft", variants: legs, position: { x: 8, y: 6 }, role: "limb" },
+    { name: "legBackRight", variants: legs, position: { x: 10, y: 6 }, role: "limb" },
+    { name: "trunk", variants: trunks, position: { x: 0, y: 2 }, role: "accessory" },
+    { name: "earLeft", variants: ears, position: { x: 2, y: 0 }, role: "accessory" },
+    { name: "earRight", variants: ears, position: { x: 10, y: 0 }, role: "accessory" },
   ],
   defaultPalette: { hide: "#9a9a9a", eye: "#1a1a1a" },
   allowedRegionTags: ["hide", "eye"],
@@ -1446,7 +1675,7 @@ export const elephantDefinition: ObjectDefinition = {
 import { compose } from "../../core/composer";
 import { registerObject } from "../../core/registry";
 import { randomize } from "../../core/randomizer";
-import type { Palette } from "../../core/types";
+import type { Palette, Pose } from "../../core/types";
 import { elephantDefinition } from "./definition";
 
 registerObject(elephantDefinition);
@@ -1454,10 +1683,11 @@ registerObject(elephantDefinition);
 export interface CreateElephantOptions {
   parts?: Record<string, string>;
   palette?: Partial<Palette>;
+  pose?: Pose;
 }
 
 export function createElephant(options: CreateElephantOptions = {}) {
-  return compose(elephantDefinition, options.parts ?? {}, options.palette ?? {});
+  return compose(elephantDefinition, options.parts ?? {}, options.palette ?? {}, options.pose ?? {});
 }
 
 export function randomElephant(seed?: number) {
@@ -1472,7 +1702,8 @@ export { elephantDefinition };
 
 ```ts
 import { describe, expect, it } from "vitest";
-import { createElephant, randomElephant } from "./index";
+import { createElephant, randomElephant, elephantDefinition } from "./index";
+import { walkCycle } from "../../core/walkCycle";
 
 describe("elephant catalog object", () => {
   it("composes with defaults", () => {
@@ -1488,6 +1719,11 @@ describe("elephant catalog object", () => {
   it("randomElephant is deterministic for a given seed", () => {
     expect(randomElephant(11)).toEqual(randomElephant(11));
   });
+
+  it("marks all 4 legs as limbs for walkCycle", () => {
+    const pose = walkCycle(elephantDefinition, 0);
+    expect(Object.keys(pose)).toHaveLength(4);
+  });
 });
 ```
 
@@ -1500,12 +1736,12 @@ Expected: PASS
 
 ```bash
 git add src/catalog/elephant
-git commit -m "feat(catalog): add elephant object"
+git commit -m "feat(catalog): add elephant object with limb slots"
 ```
 
 ---
 
-### Task 12: Tree
+### Task 13: Tree
 
 **Files:**
 - Create: `src/catalog/tree/parts.ts`
@@ -1514,8 +1750,8 @@ git commit -m "feat(catalog): add elephant object"
 - Test: `src/catalog/tree/index.test.ts`
 
 **Interfaces:**
-- Consumes: `filled` from `src/catalog/_shared/gridUtils.ts` (Task 10); `compose`, `registerObject`, `randomize` from core.
-- Produces: `createTree(options?)`, `randomTree(seed?)`, `treeDefinition`.
+- Consumes: `filled` from `src/catalog/_shared/gridUtils.ts` (Task 11); `compose`, `registerObject`, `randomize` from core.
+- Produces: `createTree(options?)`, `randomTree(seed?)`, `treeDefinition`. Tree has no limb slots — it is static.
 
 - [ ] **Step 1: Write `src/catalog/tree/parts.ts`**
 
@@ -1543,8 +1779,8 @@ export const treeDefinition: ObjectDefinition = {
   width: 6,
   height: 9,
   slots: [
-    { name: "foliage", variants: foliageClusters, position: { x: 0, y: 0 } },
-    { name: "trunk", variants: trunks, position: { x: 2, y: 5 } },
+    { name: "foliage", variants: foliageClusters, position: { x: 0, y: 0 }, role: "body" },
+    { name: "trunk", variants: trunks, position: { x: 2, y: 5 }, role: "body" },
   ],
   defaultPalette: { bark: "#6b4423", leaf: "#2e8b3d" },
   allowedRegionTags: ["bark", "leaf"],
@@ -1617,7 +1853,7 @@ git commit -m "feat(catalog): add tree object"
 
 ---
 
-### Task 13: Octopod robot
+### Task 14: Octopod robot
 
 **Files:**
 - Create: `src/catalog/robots/octopod/parts.ts`
@@ -1626,8 +1862,8 @@ git commit -m "feat(catalog): add tree object"
 - Test: `src/catalog/robots/octopod/index.test.ts`
 
 **Interfaces:**
-- Consumes: `filled`, `withPixels` from `src/catalog/_shared/gridUtils.ts` (Task 10); `compose`, `registerObject`, `randomize` from core.
-- Produces: `createOctopod(options?)`, `randomOctopod(seed?)`, `octopodDefinition`. Establishes the 8-slot variable-limb pattern reused (with different counts) by Tasks 14-15.
+- Consumes: `filled`, `withPixels` from `src/catalog/_shared/gridUtils.ts` (Task 11); `compose`, `registerObject`, `randomize` from core.
+- Produces: `createOctopod(options?)`, `randomOctopod(seed?)`, `octopodDefinition`. Establishes the 8-slot variable-limb pattern (all marked `role: "limb"`) reused (with different counts) by Tasks 15-16.
 
 - [ ] **Step 1: Write `src/catalog/robots/octopod/parts.ts`**
 
@@ -1661,13 +1897,14 @@ const legSlots: SlotDefinition[] = Array.from({ length: 8 }, (_, i) => ({
   name: `leg${i}`,
   variants: legs,
   position: { x: i, y: 4 },
+  role: "limb",
 }));
 
 export const octopodDefinition: ObjectDefinition = {
   name: "octopod",
   width: 8,
   height: 7,
-  slots: [{ name: "body", variants: bodies, position: { x: 1, y: 0 } }, ...legSlots],
+  slots: [{ name: "body", variants: bodies, position: { x: 1, y: 0 }, role: "body" }, ...legSlots],
   defaultPalette: { chassis: "#888888", joint: "#444444", eye: "#ff3333" },
   allowedRegionTags: ["chassis", "joint", "eye"],
   paletteOptions: [{}, { chassis: "#5577ff" }, { eye: "#33ff88" }],
@@ -1680,7 +1917,7 @@ export const octopodDefinition: ObjectDefinition = {
 import { compose } from "../../../core/composer";
 import { registerObject } from "../../../core/registry";
 import { randomize } from "../../../core/randomizer";
-import type { Palette } from "../../../core/types";
+import type { Palette, Pose } from "../../../core/types";
 import { octopodDefinition } from "./definition";
 
 registerObject(octopodDefinition);
@@ -1688,10 +1925,11 @@ registerObject(octopodDefinition);
 export interface CreateOctopodOptions {
   parts?: Record<string, string>;
   palette?: Partial<Palette>;
+  pose?: Pose;
 }
 
 export function createOctopod(options: CreateOctopodOptions = {}) {
-  return compose(octopodDefinition, options.parts ?? {}, options.palette ?? {});
+  return compose(octopodDefinition, options.parts ?? {}, options.palette ?? {}, options.pose ?? {});
 }
 
 export function randomOctopod(seed?: number) {
@@ -1707,11 +1945,12 @@ export { octopodDefinition };
 ```ts
 import { describe, expect, it } from "vitest";
 import { createOctopod, randomOctopod, octopodDefinition } from "./index";
+import { walkCycle } from "../../../core/walkCycle";
 
 describe("octopod catalog object", () => {
-  it("declares 8 leg slots", () => {
-    const legSlots = octopodDefinition.slots.filter((s) => s.name.startsWith("leg"));
-    expect(legSlots).toHaveLength(8);
+  it("declares 8 leg slots marked as limbs", () => {
+    const pose = walkCycle(octopodDefinition, 0);
+    expect(Object.keys(pose)).toHaveLength(8);
   });
 
   it("composes with defaults", () => {
@@ -1734,12 +1973,12 @@ Expected: PASS
 
 ```bash
 git add src/catalog/robots/octopod
-git commit -m "feat(catalog): add octopod robot"
+git commit -m "feat(catalog): add octopod robot with 8 limb slots"
 ```
 
 ---
 
-### Task 14: Tetrapod robot
+### Task 15: Tetrapod robot
 
 **Files:**
 - Create: `src/catalog/robots/tetrapod/parts.ts`
@@ -1749,7 +1988,7 @@ git commit -m "feat(catalog): add octopod robot"
 
 **Interfaces:**
 - Consumes: `filled`, `withPixels` from `src/catalog/_shared/gridUtils.ts`; `compose`, `registerObject`, `randomize` from core.
-- Produces: `createTetrapod(options?)`, `randomTetrapod(seed?)`, `tetrapodDefinition`.
+- Produces: `createTetrapod(options?)`, `randomTetrapod(seed?)`, `tetrapodDefinition`. Its 4 leg slots are marked `role: "limb"`.
 
 - [ ] **Step 1: Write `src/catalog/robots/tetrapod/parts.ts`**
 
@@ -1780,18 +2019,21 @@ import type { ObjectDefinition, SlotDefinition } from "../../../core/types";
 import { bodies, legs } from "./parts";
 
 const legSlots: SlotDefinition[] = [1, 5].flatMap((x) =>
-  [0, 1].map((i): SlotDefinition => ({
-    name: `leg${x}_${i}`,
-    variants: legs,
-    position: { x: x + i, y: 4 },
-  }))
+  [0, 1].map(
+    (i): SlotDefinition => ({
+      name: `leg${x}_${i}`,
+      variants: legs,
+      position: { x: x + i, y: 4 },
+      role: "limb",
+    })
+  )
 );
 
 export const tetrapodDefinition: ObjectDefinition = {
   name: "tetrapod",
   width: 8,
   height: 7,
-  slots: [{ name: "body", variants: bodies, position: { x: 0, y: 0 } }, ...legSlots],
+  slots: [{ name: "body", variants: bodies, position: { x: 0, y: 0 }, role: "body" }, ...legSlots],
   defaultPalette: { chassis: "#888888", joint: "#444444", eye: "#ff3333" },
   allowedRegionTags: ["chassis", "joint", "eye"],
   paletteOptions: [{}, { chassis: "#aa5533" }, { eye: "#33aaff" }],
@@ -1804,7 +2046,7 @@ export const tetrapodDefinition: ObjectDefinition = {
 import { compose } from "../../../core/composer";
 import { registerObject } from "../../../core/registry";
 import { randomize } from "../../../core/randomizer";
-import type { Palette } from "../../../core/types";
+import type { Palette, Pose } from "../../../core/types";
 import { tetrapodDefinition } from "./definition";
 
 registerObject(tetrapodDefinition);
@@ -1812,10 +2054,11 @@ registerObject(tetrapodDefinition);
 export interface CreateTetrapodOptions {
   parts?: Record<string, string>;
   palette?: Partial<Palette>;
+  pose?: Pose;
 }
 
 export function createTetrapod(options: CreateTetrapodOptions = {}) {
-  return compose(tetrapodDefinition, options.parts ?? {}, options.palette ?? {});
+  return compose(tetrapodDefinition, options.parts ?? {}, options.palette ?? {}, options.pose ?? {});
 }
 
 export function randomTetrapod(seed?: number) {
@@ -1831,11 +2074,12 @@ export { tetrapodDefinition };
 ```ts
 import { describe, expect, it } from "vitest";
 import { createTetrapod, randomTetrapod, tetrapodDefinition } from "./index";
+import { walkCycle } from "../../../core/walkCycle";
 
 describe("tetrapod catalog object", () => {
-  it("declares 4 leg slots", () => {
-    const legSlots = tetrapodDefinition.slots.filter((s) => s.name.startsWith("leg"));
-    expect(legSlots).toHaveLength(4);
+  it("declares 4 leg slots marked as limbs", () => {
+    const pose = walkCycle(tetrapodDefinition, 0);
+    expect(Object.keys(pose)).toHaveLength(4);
   });
 
   it("composes with defaults", () => {
@@ -1857,12 +2101,12 @@ Expected: PASS
 
 ```bash
 git add src/catalog/robots/tetrapod
-git commit -m "feat(catalog): add tetrapod robot"
+git commit -m "feat(catalog): add tetrapod robot with 4 limb slots"
 ```
 
 ---
 
-### Task 15: Flying bot
+### Task 16: Flying bot
 
 **Files:**
 - Create: `src/catalog/robots/flyingBot/parts.ts`
@@ -1872,7 +2116,7 @@ git commit -m "feat(catalog): add tetrapod robot"
 
 **Interfaces:**
 - Consumes: `filled`, `withPixels` from `src/catalog/_shared/gridUtils.ts`; `compose`, `registerObject`, `randomize` from core.
-- Produces: `createFlyingBot(options?)`, `randomFlyingBot(seed?)`, `flyingBotDefinition`.
+- Produces: `createFlyingBot(options?)`, `randomFlyingBot(seed?)`, `flyingBotDefinition`. No legs — its 2 thruster slots are marked `role: "limb"` so `walkCycle` gives it a hover bob instead of a walk.
 
 - [ ] **Step 1: Write `src/catalog/robots/flyingBot/parts.ts`**
 
@@ -1907,9 +2151,9 @@ export const flyingBotDefinition: ObjectDefinition = {
   width: 6,
   height: 6,
   slots: [
-    { name: "body", variants: bodies, position: { x: 0, y: 0 } },
-    { name: "thrusterLeft", variants: thrusters, position: { x: 0, y: 4 }, layer: -1 },
-    { name: "thrusterRight", variants: thrusters, position: { x: 4, y: 4 }, layer: -1 },
+    { name: "body", variants: bodies, position: { x: 0, y: 0 }, role: "body" },
+    { name: "thrusterLeft", variants: thrusters, position: { x: 0, y: 4 }, layer: -1, role: "limb" },
+    { name: "thrusterRight", variants: thrusters, position: { x: 4, y: 4 }, layer: -1, role: "limb" },
   ],
   defaultPalette: { chassis: "#cccccc", thruster: "#3388ff", eye: "#ff3333" },
   allowedRegionTags: ["chassis", "thruster", "eye"],
@@ -1923,7 +2167,7 @@ export const flyingBotDefinition: ObjectDefinition = {
 import { compose } from "../../../core/composer";
 import { registerObject } from "../../../core/registry";
 import { randomize } from "../../../core/randomizer";
-import type { Palette } from "../../../core/types";
+import type { Palette, Pose } from "../../../core/types";
 import { flyingBotDefinition } from "./definition";
 
 registerObject(flyingBotDefinition);
@@ -1931,10 +2175,11 @@ registerObject(flyingBotDefinition);
 export interface CreateFlyingBotOptions {
   parts?: Record<string, string>;
   palette?: Partial<Palette>;
+  pose?: Pose;
 }
 
 export function createFlyingBot(options: CreateFlyingBotOptions = {}) {
-  return compose(flyingBotDefinition, options.parts ?? {}, options.palette ?? {});
+  return compose(flyingBotDefinition, options.parts ?? {}, options.palette ?? {}, options.pose ?? {});
 }
 
 export function randomFlyingBot(seed?: number) {
@@ -1950,11 +2195,17 @@ export { flyingBotDefinition };
 ```ts
 import { describe, expect, it } from "vitest";
 import { createFlyingBot, randomFlyingBot, flyingBotDefinition } from "./index";
+import { walkCycle } from "../../../core/walkCycle";
 
 describe("flying bot catalog object", () => {
   it("has no leg slots, only body and thrusters", () => {
     const names = flyingBotDefinition.slots.map((s) => s.name);
     expect(names).toEqual(["body", "thrusterLeft", "thrusterRight"]);
+  });
+
+  it("marks both thrusters as limbs for walkCycle", () => {
+    const pose = walkCycle(flyingBotDefinition, 0);
+    expect(Object.keys(pose).sort()).toEqual(["thrusterLeft", "thrusterRight"]);
   });
 
   it("composes with defaults", () => {
@@ -1976,12 +2227,12 @@ Expected: PASS
 
 ```bash
 git add src/catalog/robots/flyingBot
-git commit -m "feat(catalog): add flying bot robot"
+git commit -m "feat(catalog): add flying bot robot with thruster limb slots"
 ```
 
 ---
 
-### Task 16: Uni-eyed UFO robot
+### Task 17: Uni-eyed UFO robot
 
 **Files:**
 - Create: `src/catalog/robots/ufo/parts.ts`
@@ -1991,7 +2242,7 @@ git commit -m "feat(catalog): add flying bot robot"
 
 **Interfaces:**
 - Consumes: `filled`, `withPixels` from `src/catalog/_shared/gridUtils.ts`; `compose`, `registerObject`, `randomize` from core.
-- Produces: `createUfo(options?)`, `randomUfo(seed?)`, `ufoDefinition`.
+- Produces: `createUfo(options?)`, `randomUfo(seed?)`, `ufoDefinition`. No limb slots — it does not animate via `walkCycle`.
 
 - [ ] **Step 1: Write `src/catalog/robots/ufo/parts.ts`**
 
@@ -2026,8 +2277,8 @@ export const ufoDefinition: ObjectDefinition = {
   width: 8,
   height: 4,
   slots: [
-    { name: "dome", variants: domes, position: { x: 2, y: 0 } },
-    { name: "saucer", variants: saucers, position: { x: 0, y: 2 } },
+    { name: "dome", variants: domes, position: { x: 2, y: 0 }, role: "body" },
+    { name: "saucer", variants: saucers, position: { x: 0, y: 2 }, role: "body" },
   ],
   defaultPalette: { saucer: "#999999", dome: "#66cccc", eye: "#ff3333" },
   allowedRegionTags: ["saucer", "dome", "eye"],
@@ -2068,11 +2319,16 @@ export { ufoDefinition };
 ```ts
 import { describe, expect, it } from "vitest";
 import { createUfo, randomUfo, ufoDefinition } from "./index";
+import { walkCycle } from "../../../core/walkCycle";
 
 describe("ufo catalog object", () => {
   it("has no limb slots, only dome and saucer", () => {
     const names = ufoDefinition.slots.map((s) => s.name);
     expect(names).toEqual(["dome", "saucer"]);
+  });
+
+  it("walkCycle returns an empty pose since it has no limbs", () => {
+    expect(walkCycle(ufoDefinition, 0)).toEqual({});
   });
 
   it("composes with a single eye pixel", () => {
@@ -2101,14 +2357,14 @@ git commit -m "feat(catalog): add uni-eyed ufo robot"
 
 ---
 
-### Task 17: Primitive shapes (Cube, Oblongoid, Sphere)
+### Task 18: Primitive shapes (Cube, Oblongoid, Sphere)
 
 **Files:**
 - Create: `src/catalog/primitives/index.ts`
 - Test: `src/catalog/primitives/index.test.ts`
 
 **Interfaces:**
-- Consumes: `composeShape` from `src/core/composer.ts` (Task 5), `registerShape` from `src/core/registry.ts` (Task 4), `mulberry32` from `src/core/randomizer.ts` (Task 6).
+- Consumes: `composeShape` from `src/core/composer.ts` (Task 5), `registerShape` from `src/core/registry.ts` (Task 4), `mulberry32` from `src/core/randomizer.ts` (Task 7).
 - Produces: `createCube(color?)`, `randomCube(seed?)`, `createOblongoid(color?)`, `randomOblongoid(seed?)`, `createSphere(color?)`, `randomSphere(seed?)`, `cubeDefinition`, `oblongoidDefinition`, `sphereDefinition`.
 
 - [ ] **Step 1: Write `src/catalog/primitives/index.ts`**
@@ -2235,7 +2491,7 @@ git commit -m "feat(catalog): add cube, oblongoid and sphere primitives"
 
 ---
 
-### Task 18: Catalog and root barrel exports
+### Task 19: Catalog and root barrel exports
 
 **Files:**
 - Create: `src/catalog/index.ts`
@@ -2244,8 +2500,8 @@ git commit -m "feat(catalog): add cube, oblongoid and sphere primitives"
 - Test: `src/index.test.ts`
 
 **Interfaces:**
-- Consumes: every catalog module from Tasks 10-17; `src/core/index.ts` from Task 7.
-- Produces: the full `8bot` and `8bot/catalog` public surfaces.
+- Consumes: every catalog module from Tasks 11-18; `src/core/index.ts` from Task 8.
+- Produces: the full `8bot` and `8bot/catalog` public surfaces, including `walkCycle`, `getBounds`, and `intersects` re-exported at the root via core.
 
 - [ ] **Step 1: Write `src/catalog/index.ts`**
 
@@ -2308,12 +2564,18 @@ export * from "./catalog";
 
 ```ts
 import { describe, expect, it } from "vitest";
-import { createHuman, compose } from "./index";
+import { createHuman, compose, walkCycle, getBounds, intersects } from "./index";
 
 describe("root package export", () => {
   it("re-exports core and catalog together", () => {
     expect(typeof createHuman).toBe("function");
     expect(typeof compose).toBe("function");
+  });
+
+  it("re-exports movement and interaction helpers", () => {
+    expect(typeof walkCycle).toBe("function");
+    expect(typeof getBounds).toBe("function");
+    expect(typeof intersects).toBe("function");
   });
 });
 ```
@@ -2339,10 +2601,10 @@ git commit -m "feat: add catalog and root barrel exports"
 
 ---
 
-### Task 19: Build verification
+### Task 20: Build verification
 
 **Files:**
-- None created — this task verifies Tasks 1-18 produce a valid published artifact.
+- None created — this task verifies Tasks 1-19 produce a valid published artifact.
 
 **Interfaces:**
 - Consumes: the full `src/` tree from all prior tasks.
@@ -2358,9 +2620,10 @@ Expected: tsup completes with no errors, producing `dist/index.js`, `dist/index.
 Run:
 ```bash
 node -e "const c = require('./dist/catalog/index.js'); console.log(typeof c.createHuman, typeof c.randomOctopod)"
+node -e "const core = require('./dist/core/index.js'); console.log(typeof core.walkCycle, typeof core.getBounds)"
 node -e "const s = require('./dist/svg/index.js'); console.log(typeof s.toSvgString)"
 ```
-Expected: both print `function function`.
+Expected: first line prints `function function`; second prints `function function`; third prints `function`.
 
 - [ ] **Step 3: Run the full test suite one more time**
 
@@ -2378,14 +2641,14 @@ If no changes were needed, skip this step (nothing to commit).
 
 ---
 
-### Task 20: README
+### Task 21: README
 
 **Files:**
 - Modify: `README.md`
 
 **Interfaces:**
 - Consumes: nothing (documentation only).
-- Produces: usage documentation for consumers.
+- Produces: usage documentation for consumers, including animating limbs and positioning/interaction in a React app.
 
 - [ ] **Step 1: Write `README.md`**
 
@@ -2426,16 +2689,75 @@ document.body.innerHTML = toSvgString(human, { pixelSize: 8 });
 
 ## Built-in catalog
 
-| Object | Import |
-|---|---|
-| Human | `createHuman`, `randomHuman` |
-| Elephant | `createElephant`, `randomElephant` |
-| Tree | `createTree`, `randomTree` |
-| Octopod robot | `createOctopod`, `randomOctopod` |
-| Tetrapod robot | `createTetrapod`, `randomTetrapod` |
-| Flying bot | `createFlyingBot`, `randomFlyingBot` |
-| Uni-eyed UFO | `createUfo`, `randomUfo` |
-| Cube / Oblongoid / Sphere | `createCube`, `createOblongoid`, `createSphere` (+ `randomX`) |
+| Object | Import | Limbs |
+|---|---|---|
+| Human | `createHuman`, `randomHuman` | 2 arms, 2 legs |
+| Elephant | `createElephant`, `randomElephant` | 4 legs |
+| Tree | `createTree`, `randomTree` | none (static) |
+| Octopod robot | `createOctopod`, `randomOctopod` | 8 legs |
+| Tetrapod robot | `createTetrapod`, `randomTetrapod` | 4 legs |
+| Flying bot | `createFlyingBot`, `randomFlyingBot` | 2 thrusters |
+| Uni-eyed UFO | `createUfo`, `randomUfo` | none (static) |
+| Cube / Oblongoid / Sphere | `createCube`, `createOblongoid`, `createSphere` (+ `randomX`) | n/a |
+
+## Animating limbs (walk cycle)
+
+Any object with limb slots (legs, thrusters) can be posed generically with
+`walkCycle` — no per-object animation code needed. Pass the resulting pose
+back into `createX`/`compose` each frame:
+
+```ts
+import { createOctopod, octopodDefinition } from "8bot/catalog";
+import { walkCycle } from "8bot/core";
+import { drawToCanvas } from "8bot/canvas";
+
+function renderFrame(ctx: CanvasRenderingContext2D, t: number) {
+  const pose = walkCycle(octopodDefinition, t);
+  const octopod = createOctopod({ pose });
+  drawToCanvas(ctx, octopod, { pixelSize: 8 });
+}
+```
+
+In React, drive `t` from `requestAnimationFrame`:
+
+```tsx
+function Robot() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    let frame: number;
+    const start = performance.now();
+    const tick = (now: number) => {
+      const ctx = canvasRef.current!.getContext("2d")!;
+      ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+      renderFrame(ctx, (now - start) / 200);
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  return <canvas ref={canvasRef} width={64} height={56} />;
+}
+```
+
+## Positioning and interaction
+
+8bot doesn't touch the DOM or track world position — it gives you the
+object's bounds at whatever position you tell it, so your app can compare
+against anything else on the page (e.g. a button):
+
+```ts
+import { getBounds, intersects } from "8bot/core";
+
+const robotBounds = getBounds(octopod, { x: robotX, y: robotY }, 8);
+const buttonRect = buttonEl.getBoundingClientRect();
+const buttonBounds = { x: buttonRect.x, y: buttonRect.y, width: buttonRect.width, height: buttonRect.height };
+
+if (intersects(robotBounds, buttonBounds)) {
+  // the robot has "reached" the button — trigger whatever your app needs
+}
+```
 
 ## Build a custom object
 
@@ -2477,7 +2799,9 @@ drawToCanvas(ctx, human, { mode: "isometric", pixelSize: 8 });
 
 Add a folder under `src/catalog/<name>/` with `parts.ts`, `definition.ts`,
 and `index.ts` (see `src/catalog/tree/` for the smallest example), then
-export it from `src/catalog/index.ts`. No core code changes needed.
+export it from `src/catalog/index.ts`. Mark any leg/thruster/arm slots
+`role: "limb"` to get `walkCycle` support for free. No core code changes
+needed.
 
 ## Design spec
 
@@ -2493,13 +2817,13 @@ git commit -m "docs: add usage README"
 
 ---
 
-### Task 21: Final end-to-end verification
+### Task 22: Final end-to-end verification
 
 **Files:**
 - None created.
 
 **Interfaces:**
-- Consumes: the entire package from Tasks 1-20.
+- Consumes: the entire package from Tasks 1-21.
 
 - [ ] **Step 1: Run the full check sequence**
 
@@ -2520,7 +2844,23 @@ for (const fn of ['createHuman','createElephant','createTree','createOctopod','c
 ```
 Expected: 10 lines print, each with a pixel count greater than 0, no errors thrown.
 
-- [ ] **Step 3: Confirm git status is clean**
+- [ ] **Step 3: Confirm walkCycle + getBounds/intersects work end to end on a limbed object**
+
+Run:
+```bash
+node -e "
+const c = require('./dist/catalog/index.js');
+const core = require('./dist/core/index.js');
+const pose = core.walkCycle(c.octopodDefinition, Math.PI / 2);
+const posed = c.createOctopod({ pose });
+const bounds = core.getBounds(posed, { x: 10, y: 20 }, 8);
+const other = { x: 10, y: 20, width: 5, height: 5 };
+console.log('limbCount', Object.keys(pose).length, 'bounds', JSON.stringify(bounds), 'intersects', core.intersects(bounds, other));
+"
+```
+Expected: `limbCount 8`, a bounds object with `x: 10, y: 20`, and `intersects true`.
+
+- [ ] **Step 4: Confirm git status is clean**
 
 Run: `git status`
 Expected: working tree clean, all task commits present in `git log`.
