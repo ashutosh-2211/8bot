@@ -28,6 +28,13 @@ describe("resolvePalette", () => {
       /hair/
     );
   });
+
+  it("ignores explicit undefined overrides and uses default palette value", () => {
+    expect(resolvePalette(definition, { outfit: undefined })).toEqual({
+      skin: "#e0ac69",
+      outfit: "#3355ff",
+    });
+  });
 });
 
 describe("colorForRegion", () => {

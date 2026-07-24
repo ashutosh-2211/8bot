@@ -11,7 +11,13 @@ export function resolvePalette(
       );
     }
   }
-  return { ...definition.defaultPalette, ...overrides };
+  const filtered: Palette = {};
+  for (const [tag, color] of Object.entries(overrides)) {
+    if (color !== undefined) {
+      filtered[tag] = color;
+    }
+  }
+  return { ...definition.defaultPalette, ...filtered };
 }
 
 export function colorForRegion(palette: Palette, tag: string): string {
