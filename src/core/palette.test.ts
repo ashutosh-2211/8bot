@@ -35,6 +35,12 @@ describe("resolvePalette", () => {
       outfit: "#3355ff",
     });
   });
+
+  it("throws on an override that is not a valid 6-digit hex color", () => {
+    expect(() =>
+      resolvePalette(definition, { outfit: '"/><script>alert(1)</script><rect fill="#000' })
+    ).toThrow(/Invalid color/);
+  });
 });
 
 describe("colorForRegion", () => {

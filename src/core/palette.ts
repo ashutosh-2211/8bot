@@ -1,5 +1,9 @@
 import type { Palette, ObjectDefinition } from "./types";
 
+export function isValidHexColor(value: string): boolean {
+  return /^#[0-9a-fA-F]{6}$/.test(value);
+}
+
 export function resolvePalette(
   definition: ObjectDefinition,
   overrides: Partial<Palette> = {}
@@ -14,6 +18,11 @@ export function resolvePalette(
   const filtered: Palette = {};
   for (const [tag, color] of Object.entries(overrides)) {
     if (color !== undefined) {
+      if (!isValidHexColor(color)) {
+        throw new Error(
+          `Invalid color "${color}" for region "${tag}" — expected a 6-digit hex color like "#a1b2c3"`
+        );
+      }
       filtered[tag] = color;
     }
   }

@@ -75,6 +75,10 @@ describe("compose", () => {
     const empty: ObjectDefinition = { ...square, slots: [{ name: "block", position: { x: 0, y: 0 }, variants: [] }] };
     expect(() => compose(empty)).toThrow(/no variants/);
   });
+
+  it("throws for a palette override that is not a valid hex color", () => {
+    expect(() => compose(square, {}, { fill: "javascript:alert(1)" })).toThrow(/Invalid color/);
+  });
 });
 
 describe("composeShape", () => {
@@ -112,5 +116,11 @@ describe("composeShape", () => {
     const result = composeShape(cube, "#00ff00");
     const base = result.pixels.find((p) => p.x === 2 && p.y === 2)!;
     expect(base.color).toBe("#00ff00");
+  });
+
+  it("throws for a color override that is not a valid hex color", () => {
+    expect(() =>
+      composeShape(cube, '"/><script>alert(1)</script><rect fill="#000')
+    ).toThrow(/Invalid color/);
   });
 });

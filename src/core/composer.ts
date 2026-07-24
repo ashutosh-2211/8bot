@@ -6,7 +6,7 @@ import type {
   Palette,
   Pose,
 } from "./types";
-import { resolvePalette, colorForRegion, lighten, darken } from "./palette";
+import { resolvePalette, colorForRegion, lighten, darken, isValidHexColor } from "./palette";
 
 export function compose(
   definition: ObjectDefinition,
@@ -56,6 +56,11 @@ export function composeShape(
   definition: ShapeDefinition,
   colorOverride?: string
 ): ComposedObject {
+  if (colorOverride !== undefined && !isValidHexColor(colorOverride)) {
+    throw new Error(
+      `Invalid color "${colorOverride}" for shape "${definition.name}" — expected a 6-digit hex color like "#a1b2c3"`
+    );
+  }
   const baseColor = colorOverride ?? definition.defaultColor;
   const topColor = lighten(baseColor, 0.3);
   const sideColor = darken(baseColor, 0.3);

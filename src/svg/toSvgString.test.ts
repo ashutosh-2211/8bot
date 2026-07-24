@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toSvgString, renderToSvgElement } from "./toSvgString";
+import { toSvgString, renderToSvgElement, escapeAttr } from "./toSvgString";
 import type { ComposedObject } from "../core/types";
 
 const object: ComposedObject = {
@@ -25,6 +25,28 @@ describe("toSvgString", () => {
     const svg = toSvgString(object, { pixelSize: 3 });
     expect(svg).toContain('width="6"');
     expect(svg).toContain('height="3"');
+  });
+
+  it("escapes a malicious color value so it cannot break out of the fill attribute", () => {
+    // Bypasses compose/composeShape validation by hand-building a ComposedObject,
+    // simulating any future path that might skip upstream hex validation.
+    const malicious: ComposedObject = {
+      name: "hacked",
+      width: 1,
+      height: 1,
+      pixels: [
+        { x: 0, y: 0, color: '"/><script>alert(1)</script><rect fill="#000', layer: 0 },
+      ],
+    };
+    const svg = toSvgString(malicious);
+    expect(svg).not.toContain("<script>");
+    expect(svg.match(/<rect/g)).toHaveLength(1);
+  });
+});
+
+describe("escapeAttr", () => {
+  it("escapes ampersand, angle brackets, and quote characters", () => {
+    expect(escapeAttr(`&<>"'`)).toBe("&amp;&lt;&gt;&quot;&#39;");
   });
 });
 

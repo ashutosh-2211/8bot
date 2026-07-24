@@ -5,6 +5,15 @@ export interface SvgOptions {
   mode?: "flat" | "isometric";
 }
 
+export function escapeAttr(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export function toSvgString(object: ComposedObject, options: SvgOptions = {}): string {
   const pixelSize = options.pixelSize ?? 1;
   const mode = options.mode ?? "flat";
@@ -17,7 +26,7 @@ export function toSvgString(object: ComposedObject, options: SvgOptions = {}): s
     .map((pixel) => {
       const px = mode === "isometric" ? pixel.x + pixel.layer * 0.5 : pixel.x;
       const py = mode === "isometric" ? pixel.y - pixel.layer * 0.5 : pixel.y;
-      return `<rect x="${px * pixelSize}" y="${py * pixelSize}" width="${pixelSize}" height="${pixelSize}" fill="${pixel.color}" />`;
+      return `<rect x="${px * pixelSize}" y="${py * pixelSize}" width="${pixelSize}" height="${pixelSize}" fill="${escapeAttr(pixel.color)}" />`;
     })
     .join("");
 
