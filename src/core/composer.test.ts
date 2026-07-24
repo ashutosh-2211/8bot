@@ -79,6 +79,46 @@ describe("compose", () => {
   it("throws for a palette override that is not a valid hex color", () => {
     expect(() => compose(square, {}, { fill: "javascript:alert(1)" })).toThrow(/Invalid color/);
   });
+
+  it("grows width/height to fit pixels pushed out of bounds by a pose offset", () => {
+    const result = compose(square, {}, {}, { block: { dx: 3, dy: -1 } });
+    // static width/height are both 2, but the pose pushes pixels to x=4 and y=-1..0
+    expect(result.width).toBeGreaterThanOrEqual(5);
+    expect(result.pixels.every((p) => p.x < result.width)).toBe(true);
+  });
+
+  it("never shrinks below the static width/height when unposed", () => {
+    const result = compose(square);
+    expect(result.width).toBe(square.width);
+    expect(result.height).toBe(square.height);
+  });
+
+  it("grows height when a limb pose offset pushes a pixel below the static bottom edge", () => {
+    const withLimb: ObjectDefinition = {
+      name: "limbed",
+      width: 4,
+      height: 4,
+      slots: [
+        {
+          name: "leg",
+          position: { x: 0, y: 3 },
+          role: "limb",
+          variants: [
+            { id: "solid", anchor: { x: 0, y: 0 }, grid: [["fill"]] },
+          ],
+        },
+      ],
+      defaultPalette: { fill: "#112233" },
+      allowedRegionTags: ["fill"],
+    };
+    const noPose = compose(withLimb);
+    expect(noPose.height).toBe(4);
+
+    const posed = compose(withLimb, {}, {}, { leg: { dy: 1 } });
+    expect(posed.pixels[0].y).toBe(4);
+    expect(posed.height).toBeGreaterThanOrEqual(5);
+    expect(posed.pixels.every((p) => p.y < posed.height)).toBe(true);
+  });
 });
 
 describe("composeShape", () => {

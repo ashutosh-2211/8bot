@@ -49,7 +49,16 @@ export function compose(
     });
   }
 
-  return { name: definition.name, width: definition.width, height: definition.height, pixels };
+  let maxPixelX = 0;
+  let maxPixelY = 0;
+  for (const pixel of pixels) {
+    if (pixel.x > maxPixelX) maxPixelX = pixel.x;
+    if (pixel.y > maxPixelY) maxPixelY = pixel.y;
+  }
+  const width = Math.max(definition.width, maxPixelX + 1);
+  const height = Math.max(definition.height, maxPixelY + 1);
+
+  return { name: definition.name, width, height, pixels };
 }
 
 export function composeShape(
