@@ -3,8 +3,16 @@ import type { ObjectDefinition, ShapeDefinition } from "./types";
 const objects = new Map<string, ObjectDefinition>();
 const shapes = new Map<string, ShapeDefinition>();
 
+function isDeepEqual(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 export function registerObject(definition: ObjectDefinition): void {
-  if (objects.has(definition.name)) {
+  const existing = objects.get(definition.name);
+  if (existing) {
+    if (isDeepEqual(existing, definition)) {
+      return;
+    }
     throw new Error(`Object "${definition.name}" already registered`);
   }
   objects.set(definition.name, definition);
@@ -23,7 +31,11 @@ export function listObjects(): string[] {
 }
 
 export function registerShape(definition: ShapeDefinition): void {
-  if (shapes.has(definition.name)) {
+  const existing = shapes.get(definition.name);
+  if (existing) {
+    if (isDeepEqual(existing, definition)) {
+      return;
+    }
     throw new Error(`Shape "${definition.name}" already registered`);
   }
   shapes.set(definition.name, definition);
