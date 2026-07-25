@@ -6,3 +6,4 @@ export * from "./robots/tetrapod";
 export * from "./robots/flyingBot";
 export * from "./robots/ufo";
 export * from "./primitives";
+export * from "./sprite";

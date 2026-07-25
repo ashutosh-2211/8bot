@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>8bot demo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: #12141c;
+    color: #e7e9f0;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    padding: 32px 24px 64px;
+  }
+  header { max-width: 900px; margin: 0 auto 28px; }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  p { color: #9aa2b8; font-size: 13px; margin: 0; }
+  .toolbar { display: flex; gap: 10px; margin-top: 16px; }
+  button {
+    background: #e7ab4c; color: #21170a; border: none; border-radius: 4px;
+    padding: 8px 14px; font: inherit; font-weight: 600; cursor: pointer;
+  }
+  button:hover { background: #f0c47c; }
+  .grid {
+    max-width: 900px; margin: 0 auto;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 18px;
+  }
+  .card {
+    background: #191d29; border: 1px solid #2c3244; border-radius: 8px; padding: 14px;
+  }
+  .card canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; background: #0c0e15; border-radius: 4px; }
+  .card .label {
+    display: flex; justify-content: space-between; margin-top: 10px; font-size: 11px;
+    letter-spacing: 0.04em; text-transform: uppercase; color: #9aa2b8;
+  }
+  .card .label b { color: #e7e9f0; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>8bot — live sprite demo</h1>
+    <p>Every subject running through <code>createSprite</code> / <code>spriteDefinition</code> straight from <code>dist/</code>. Human, animal and bird show real <code>walkCycle</code> limb motion; all moving subjects also translate across x/y each frame — that part is just <code>ctx.translate()</code> in this demo, not a library feature.</p>
+    <div class="toolbar">
+      <button id="reseed">↻ reseed all</button>
+    </div>
+  </header>
+  <div class="grid" id="grid"></div>
+  <script type="module" src="/demo/main.mjs"></script>
+</body>
+</html>
