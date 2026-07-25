@@ -1,6 +1,6 @@
 {
   "name": "@askash/8bot",
-  "version": "1.0.2",
+  "version": "1.1.1",
   "description": "This is a package consisting of all the random 8 bit pixeleted character generation for websites web games etc",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
